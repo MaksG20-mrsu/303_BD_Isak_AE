@@ -9,13 +9,11 @@ def escape_sql(value):
 def generate_sql():
     sql_lines = []
     
-    # Сброс старых таблиц
     tables = ['movies', 'ratings', 'tags', 'users']
     for table in tables:
         sql_lines.append(f"DROP TABLE IF EXISTS {table};")
     sql_lines.append("")
 
-    # 1. Схема movies
     sql_lines.append("""CREATE TABLE movies (
     id INTEGER PRIMARY KEY,
     title TEXT,
@@ -23,7 +21,6 @@ def generate_sql():
     genres TEXT
 );""")
 
-    # 2. Схема ratings
     sql_lines.append("""CREATE TABLE ratings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -32,7 +29,6 @@ def generate_sql():
     timestamp INTEGER
 );""")
 
-    # 3. Схема tags
     sql_lines.append("""CREATE TABLE tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
@@ -41,7 +37,6 @@ def generate_sql():
     timestamp INTEGER
 );""")
 
-    # 4. Схема users
     sql_lines.append("""CREATE TABLE users (
     id INTEGER PRIMARY KEY,
     name TEXT,
@@ -54,7 +49,7 @@ def generate_sql():
 
     def file_to_inserts(filename, table_name, columns, delimiter=','):
         if not os.path.exists(filename):
-            print(f"Ошибка: Файл {filename} не найден.")
+            print(f"Error: {filename} not found.")
             return
         
         with open(filename, mode='r', encoding='utf-8') as f:
@@ -72,7 +67,7 @@ def generate_sql():
 
             reader = csv.reader(f, delimiter=current_delimiter)
             try:
-                next(reader)  # Пропуск заголовка
+                next(reader)
             except StopIteration:
                 return
             
@@ -80,7 +75,6 @@ def generate_sql():
                 if not row or len(row) == 0:
                     continue
                 
-                # Защита от пустых или сломанных строк
                 if len(row) != len(columns):
                     continue
                 
@@ -100,7 +94,6 @@ def generate_sql():
                 val_str = ", ".join(escaped_row)
                 sql_lines.append(f"INSERT INTO {table_name} ({col_str}) VALUES ({val_str});")
 
-    # Передаем только те колонки, которые ФИЗИЧЕСКИ есть в файлах данных
     file_to_inserts("movies.csv", "movies", ["id", "title", "year", "genres"], delimiter=',')
     file_to_inserts("ratings.csv", "ratings", ["user_id", "movie_id", "rating", "timestamp"], delimiter=',')
     file_to_inserts("tags.csv", "tags", ["user_id", "movie_id", "tag", "timestamp"], delimiter=',')
@@ -108,7 +101,7 @@ def generate_sql():
 
     with open(OUTPUT_SQL, "w", encoding="utf-8") as f:
         f.write("\n".join(sql_lines))
-    print(f"Скрипт {OUTPUT_SQL} успешно сгенерирован!")
+    print(f"Script {OUTPUT_SQL} successfully generated!")
 
 if __name__ == "__main__":
     generate_sql()
