@@ -1,107 +1,112 @@
-import os
 import csv
+import os
+import re
 
-OUTPUT_SQL = "db_init.sql"
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_FILE = "db_init.sql"
 
-def escape_sql(value):
-    return value.replace("'", "''")
+YEAR_RE = re.compile(r"^(.*?)\s*\((\d{4})\)\s*$")
 
-def generate_sql():
-    sql_lines = []
-    
-    tables = ['movies', 'ratings', 'tags', 'users']
-    for table in tables:
-        sql_lines.append(f"DROP TABLE IF EXISTS {table};")
-    sql_lines.append("")
 
-    sql_lines.append("""CREATE TABLE movies (
+def q(value):
+    return "'" + value.replace("'", "''") + "'"
+
+
+def read_csv(name):
+    with open(os.path.join(SRC_DIR, name), encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        next(reader)
+        yield from reader
+
+
+def read_users(name):
+    with open(os.path.join(SRC_DIR, name), encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+            if line:
+                yield line.split("|")
+
+
+SCHEMA = """\
+DROP TABLE IF EXISTS movies;
+DROP TABLE IF EXISTS ratings;
+DROP TABLE IF EXISTS tags;
+DROP TABLE IF EXISTS users;
+
+CREATE TABLE movies (
     id INTEGER PRIMARY KEY,
-    title TEXT,
+    title VARCHAR(255) NOT NULL,
     year INTEGER,
-    genres TEXT
-);""")
+    genres VARCHAR(255)
+);
 
-    sql_lines.append("""CREATE TABLE ratings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    movie_id INTEGER,
-    rating REAL,
-    timestamp INTEGER
-);""")
-
-    sql_lines.append("""CREATE TABLE tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    movie_id INTEGER,
-    tag TEXT,
-    timestamp INTEGER
-);""")
-
-    sql_lines.append("""CREATE TABLE users (
+CREATE TABLE ratings (
     id INTEGER PRIMARY KEY,
-    name TEXT,
-    email TEXT,
-    gender TEXT,
-    register_date TEXT,
-    occupation TEXT
-);""")
-    sql_lines.append("\n" + "-"*40 + "\n")
+    user_id INTEGER NOT NULL,
+    movie_id INTEGER NOT NULL,
+    rating REAL NOT NULL,
+    timestamp INTEGER NOT NULL
+);
 
-    def file_to_inserts(filename, table_name, columns, delimiter=','):
-        if not os.path.exists(filename):
-            print(f"Error: {filename} not found.")
-            return
-        
-        with open(filename, mode='r', encoding='utf-8') as f:
-            content_preview = f.read(2048)
-            f.seek(0)
-            
-            current_delimiter = delimiter
-            if filename.endswith('.txt'):
-                if '\t' in content_preview:
-                    current_delimiter = '\t'
-                elif ';' in content_preview:
-                    current_delimiter = ';'
-                elif ',' in content_preview:
-                    current_delimiter = ','
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    movie_id INTEGER NOT NULL,
+    tag VARCHAR(255) NOT NULL,
+    timestamp INTEGER NOT NULL
+);
 
-            reader = csv.reader(f, delimiter=current_delimiter)
-            try:
-                next(reader)
-            except StopIteration:
-                return
-            
-            for row in reader:
-                if not row or len(row) == 0:
-                    continue
-                
-                if len(row) != len(columns):
-                    continue
-                
-                escaped_row = []
-                for x in row:
-                    x = x.strip()
-                    if x.isdigit():
-                        escaped_row.append(x)
-                    else:
-                        try:
-                            float(x)
-                            escaped_row.append(x)
-                        except ValueError:
-                            escaped_row.append(f"'{escape_sql(x)}'")
-                
-                col_str = ", ".join(columns)
-                val_str = ", ".join(escaped_row)
-                sql_lines.append(f"INSERT INTO {table_name} ({col_str}) VALUES ({val_str});")
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    gender VARCHAR(10),
+    register_date VARCHAR(10),
+    occupation VARCHAR(50)
+);
+"""
 
-    file_to_inserts("movies.csv", "movies", ["id", "title", "year", "genres"], delimiter=',')
-    file_to_inserts("ratings.csv", "ratings", ["user_id", "movie_id", "rating", "timestamp"], delimiter=',')
-    file_to_inserts("tags.csv", "tags", ["user_id", "movie_id", "tag", "timestamp"], delimiter=',')
-    file_to_inserts("users.txt", "users", ["id", "name", "email", "gender", "register_date", "occupation"])
 
-    with open(OUTPUT_SQL, "w", encoding="utf-8") as f:
-        f.write("\n".join(sql_lines))
-    print(f"Script {OUTPUT_SQL} successfully generated!")
+def main():
+    lines = [SCHEMA, "BEGIN TRANSACTION;"]
+
+    for movie_id, title, genres in read_csv("movies.csv"):
+        m = YEAR_RE.match(title)
+        if m:
+            title, year = m.group(1), m.group(2)
+        else:
+            year = "NULL"
+        lines.append(
+            "INSERT INTO movies (id, title, year, genres) "
+            f"VALUES ({int(movie_id)}, {q(title)}, {year}, {q(genres)});"
+        )
+
+    for i, (user_id, movie_id, rating, ts) in enumerate(read_csv("ratings.csv"), 1):
+        lines.append(
+            "INSERT INTO ratings (id, user_id, movie_id, rating, timestamp) "
+            f"VALUES ({i}, {int(user_id)}, {int(movie_id)}, {float(rating)}, {int(ts)});"
+        )
+
+    for i, (user_id, movie_id, tag, ts) in enumerate(read_csv("tags.csv"), 1):
+        lines.append(
+            "INSERT INTO tags (id, user_id, movie_id, tag, timestamp) "
+            f"VALUES ({i}, {int(user_id)}, {int(movie_id)}, {q(tag)}, {int(ts)});"
+        )
+
+    for user_id, name, email, gender, reg_date, occupation in read_users("users.txt"):
+        lines.append(
+            "INSERT INTO users (id, name, email, gender, register_date, occupation) "
+            f"VALUES ({int(user_id)}, {q(name)}, {q(email)}, {q(gender)}, "
+            f"{q(reg_date)}, {q(occupation)});"
+        )
+
+    lines.append("COMMIT;")
+
+    with open(OUT_FILE, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+    print(f"Created file {OUT_FILE}")
+
 
 if __name__ == "__main__":
-    generate_sql()
+    main()
